@@ -1,0 +1,83 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment Variables (IMPORTANT: 토큰 보안)
+.env
+
+# Cache & Temporary Files
+cache/
+*.npy
+*.pkl
+*.cache
+
+# Model Checkpoints & Weights (제외 - Hugging Face에서 다운로드)
+vet_rag_project/results/
+results/
+*.bin
+*.safetensors
+*.pt
+*.pth
+
+# Database & Vector Store (재생성 가능)
+vet_rag_project/db/
+
+# Generated Datasets
+# 주의: curated_dataset_*.json 파일들은 Git에 포함됩니다 (팀 공유용)
+# 단, 기본 curated_dataset.json만 제외 (큰 파일일 수 있음)
+# curated_dataset.json
+*.jsonl
+
+# Data Folder (원본 데이터 - Git에 포함)
+# 주의: data/ 폴더는 Git에 포함됩니다. 용량이 크면 .gitignore에 추가 고려
+# data/
+
+# Logs (제외)
+logs/
+*.log
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# 큐레이션/학습 관련 파일 (추론에 불필요)
+vet_rag_project/src/curator.py
+vet_rag_project/src/trainer.py
+vet_rag_project/src/llm_scorer.py
+vet_rag_project/src/graph_refiner.py
+vet_rag_project/src/evaluation.py
+vet_rag_project/build_index.py
+vet_rag_project/build_ground_truth.py
+vet_rag_project/run_single_eval.py
+vet_rag_project/test_rerank_model.py
+vet_rag_project/check_query_structure.py
+vet_rag_project/web_app.py
+vet_rag_project/app.py
+vet_rag_project/tmp_*.json
+
+# 주의: data/ 폴더는 오픈소스 데이터셋이므로 포함
+# 주의: results/final_model은 데모용으로 포함 (용량 확인 필요)

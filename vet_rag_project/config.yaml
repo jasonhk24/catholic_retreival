@@ -1,0 +1,83 @@
+# Vet RAG Project Configuration
+
+# Knowledge Base Directories (for RAG)
+knowledge_base:
+  directories:
+    - "..\\data\\TS_말뭉치데이터_내과"
+    - "..\\data\\TS_말뭉치데이터_안과"
+    - "..\\data\\TS_말뭉치데이터_외과"
+    - "..\\data\\TS_말뭉치데이터_치과"
+    - "..\\data\\TS_말뭉치데이터_피부과"
+
+# Retrieval Settings
+retrieval:
+  model_name: "madatnlp/km-bert"
+  top_k: 50
+
+# LLM Scorer Settings (for Curation)
+llm_scorer:
+  model_name: "gpt2" # Keep GPT-2 for scoring to save time/memory, or change to Qwen if desired
+  alpha_high_std: 0.7
+  beta_low_std: 0.7
+
+# LLM Settings (for Inference/Generation)
+llm:
+  model_name: "Qwen/Qwen2.5-7B-Instruct"  # Answer Generation용 Qwen2.5
+  quantization: "bnb_4bit"
+  gpu_memory_utilization: 0.90
+  max_model_len: 4096
+  dtype: "float16"
+
+# Rationale Generation Settings (RAG^2-style Query Enhancement)
+rationale_gen:
+  enabled: true  # false로 설정하면 Rationale Generation을 건너뜁니다
+  model_name: "Qwen/Qwen2.5-7B-Instruct"  # Rationale Generation용 Qwen2.5
+  temperature: 0.1  # 낮게 설정하여 일관성 있는 출력
+  top_p: 0.9
+  max_tokens: 128  # 키워드만 필요하므로 짧게
+
+# Graph Refinement Settings
+graph:
+  k_neighbors: 5
+  lambda_propagation: 0.3
+  propagation_steps: 3
+
+# Curation Settings
+curation:
+  top_k_positive: 5
+
+# Training Settings
+training:
+  # 모델 타입: "bert" 또는 "t5"
+  model_type: "bert"  # "bert" 또는 "t5"
+  
+  # 모델 설정
+  base_model: "madatnlp/km-bert"  # BERT류: "madatnlp/km-bert", "klue/bert-base" 등
+                                   # T5류: "google/t5-v1_1-base", "google/flan-t5-base" 등
+  
+  # 학습 파라미터
+  num_train_epochs: 3
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
+  learning_rate: 2e-5  # 학습률 (BERT: 2e-5, T5: 1e-4 권장)
+  warmup_steps: 500
+  weight_decay: 0.01
+  max_length: 512  # 최대 시퀀스 길이
+  
+  # 로깅 및 저장 설정
+  output_dir: "./results/bert_top25percent"
+  logging_dir: "./logs"
+  logging_steps: 10
+  eval_strategy: "epoch"  # "epoch", "steps", "no"
+  save_strategy: "epoch"  # "epoch", "steps", "no"
+  save_total_limit: 1  # 저장할 체크포인트 수 제한
+  load_best_model_at_end: true
+  metric_for_best_model: "f1"  # "accuracy", "f1", "precision", "recall"
+  
+  # Hugging Face 모델 저장소 (선택사항)
+  # upload_model.py로 모델을 업로드한 후, 아래 주석을 해제하고 리포지토리 이름을 입력하세요
+  huggingface_repo_id: "JOhyeongi/top25bert"  # 업로드된 모델 리포지토리
+  
+  # 기타 설정
+  fp16: true  # GPU 사용 시 FP16 활성화
+  report_to: null  # "tensorboard" 등으로 설정 가능
