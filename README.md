@@ -288,5 +288,6 @@ python main_curation.py --mode curate
 - **KmBERT**: 한국어 임베딩 모델 제공
 - **Qwen Team**: 고성능 한국어 LLM 제공
 - **Hugging Face**: 모델 및 라이브러리 생태계 지원
-#   c a t h o l i c _ r e t r e i v a l  
+#   c a t h o l i c _ r e t r e i v a l 
+ 
  
