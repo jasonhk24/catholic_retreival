@@ -503,7 +503,6 @@ Phase 5: Validation
 | **Top-3 정확도** | 42% | 68% | 79% |
 | **응답 시간** | 0.8초 | 2.1초 | 2.5초 |
 | **GPU 메모리** | 2.1GB | 3.4GB | 3.6GB |
-| **Hallucination** | 높음 | 중간 | 낮음 |
 
 **테스트 환경**: RTX 4060 (8GB), 180개 평가 질문
 
@@ -628,13 +627,6 @@ WANDB_DISABLED=true
 
 ---
 
-## 📚 추가 자료
-
-### 관련 논문 및 자료
-- **RAG²**: [Improving Retrieval Augmented Generation with Rationales](https://arxiv.org/abs/2305.14571)
-- **LightGCN**: [LightGCN: Simplifying and Powering Graph Convolution Network](https://arxiv.org/abs/2002.02126)
-- **KmBERT**: [madatnlp/km-bert (Hugging Face)](https://huggingface.co/madatnlp/km-bert)
-
 ### 프로젝트 구조 설명
 ```
 핵심 파이프라인 흐름:
@@ -658,40 +650,6 @@ WANDB_DISABLED=true
 ```
 
 ---
-
-## 📝 라이선스 및 인용
-
-### 라이선스
-본 프로젝트는 **연구 및 교육 목적**으로 제작되었습니다.
-
-### 인용 (Citation)
-이 프로젝트를 사용하시는 경우 다음과 같이 인용해주세요:
-```bibtex
-@misc{vet-rag-2025,
-  title={Vet RAG: 수의학 전문 질의응답 시스템},
-  author={Catholic University},
-  year={2025},
-  howpublished={\url{https://github.com/jasonhk24/catholic_retreival}}
-}
-```
-
----
-
-## 🙏 감사의 말
-
-- **OpenAI**: GPT-4o-mini API 제공
-- **KmBERT Team**: 한국어 BERT 모델 (madatnlp/km-bert)
-- **Hugging Face**: 모델 허브 및 Transformers 라이브러리
-- **PyTorch**: 딥러닝 프레임워크
-- **LangChain**: RAG 구현 지원
-
----
-
-## 📞 문의 및 지원
-
-- **GitHub Issues**: [https://github.com/jasonhk24/catholic_retreival/issues](https://github.com/jasonhk24/catholic_retreival/issues)
-- **Email**: jasonhk24@example.com
-- **Documentation**: 이 README 파일
 
 ---
 
