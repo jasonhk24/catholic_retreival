@@ -5,7 +5,15 @@ import json
 import yaml
 from typing import List, Dict, Optional
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from huggingface_hub import hf_hub_download, snapshot_download
+from pathlib import Path
+
+# Try importing OpenAI
+try:
+    from langchain_openai import ChatOpenAI
+    USE_OPENAI = True
+except ImportError:
+    print("[WARNING] langchain_openai not found. Please install: pip install langchain-openai")
+    USE_OPENAI = False
 
 # Try importing vLLM
 try:
@@ -38,71 +46,28 @@ class VetRAGPipeline:
         self.embedder = KmBertEmbedder(model_name=retrieval_model_name, device=self.device)
         
         # 2. Load Reranking Model (Cross-Encoder)
-        # Hugging Face에서 모델을 다운로드하거나 로컬 경로에서 로드
-        rerank_config = self.config.get("training", {})
-        hf_repo_id = rerank_config.get("huggingface_repo_id", None)
-        local_model_path = f"{rerank_config.get('output_dir', './results/bert_top25percent')}/final_model"
-        
-        print(f"[2/3] Loading Reranking Model...")
-        
-        # Hugging Face 리포지토리가 설정되어 있으면 우선 사용
-        if hf_repo_id:
-            print(f"   📦 Hugging Face에서 모델 다운로드: {hf_repo_id}")
-            try:
-                # Hugging Face에서 모델 다운로드 (토큰 불필요, Public 리포지토리)
-                # snapshot_download을 사용하여 전체 모델 폴더 다운로드
-                downloaded_path = snapshot_download(
-                    repo_id=hf_repo_id,
-                    repo_type="model",
-                    local_files_only=False  # 없으면 다운로드
-                )
-                print(f"   ✅ 모델 다운로드 완료: {downloaded_path}")
-                self.rerank_tokenizer = AutoTokenizer.from_pretrained(downloaded_path)
-                self.rerank_model = AutoModelForSequenceClassification.from_pretrained(downloaded_path).to(self.device)
-                self.rerank_model.eval()
-                print(f"   ✅ Reranking 모델 로드 완료")
-            except Exception as e:
-                print(f"   ⚠️  Hugging Face에서 모델 로드 실패: {e}")
-                print(f"   🔄 로컬 경로에서 시도: {local_model_path}")
-                # 로컬 경로로 fallback
-                if os.path.exists(local_model_path):
-                    try:
-                        self.rerank_tokenizer = AutoTokenizer.from_pretrained(local_model_path)
-                        self.rerank_model = AutoModelForSequenceClassification.from_pretrained(local_model_path).to(self.device)
-                        self.rerank_model.eval()
-                        print(f"   ✅ 로컬 모델 로드 완료")
-                    except Exception as e2:
-                        print(f"   ❌ 로컬 모델 로드도 실패: {e2}")
-                        print(f"   🔄 Base 모델 사용: {retrieval_model_name}")
-                        self.rerank_tokenizer = AutoTokenizer.from_pretrained(retrieval_model_name)
-                        self.rerank_model = AutoModelForSequenceClassification.from_pretrained(retrieval_model_name, num_labels=2).to(self.device)
-                else:
-                    print(f"   ❌ 로컬 경로도 존재하지 않음. Base 모델 사용: {retrieval_model_name}")
-                    self.rerank_tokenizer = AutoTokenizer.from_pretrained(retrieval_model_name)
-                    self.rerank_model = AutoModelForSequenceClassification.from_pretrained(retrieval_model_name, num_labels=2).to(self.device)
-        else:
-            # Hugging Face 리포지토리가 없으면 로컬 경로에서 로드
-            print(f"   📁 로컬 경로에서 모델 로드: {local_model_path}")
-            try:
-                if os.path.exists(local_model_path):
-                    self.rerank_tokenizer = AutoTokenizer.from_pretrained(local_model_path)
-                    self.rerank_model = AutoModelForSequenceClassification.from_pretrained(local_model_path).to(self.device)
-                    self.rerank_model.eval()
-                    print(f"   ✅ 로컬 모델 로드 완료")
-                else:
-                    raise FileNotFoundError(f"모델 경로를 찾을 수 없습니다: {local_model_path}")
-            except Exception as e:
-                print(f"   ⚠️  로컬 모델 로드 실패: {e}")
-                print(f"   🔄 Base 모델 사용: {retrieval_model_name}")
-                self.rerank_tokenizer = AutoTokenizer.from_pretrained(retrieval_model_name)
-                self.rerank_model = AutoModelForSequenceClassification.from_pretrained(retrieval_model_name, num_labels=2).to(self.device)
+        rerank_model_path = f"{self.config['training']['output_dir']}/final_model"
+        print(f"[2/3] Loading Reranking Model: {rerank_model_path}")
+        try:
+            self.rerank_tokenizer = AutoTokenizer.from_pretrained(rerank_model_path)
+            self.rerank_model = AutoModelForSequenceClassification.from_pretrained(rerank_model_path).to(self.device)
+            self.rerank_model.eval()
+        except Exception as e:
+            print(f"[WARNING] Failed to load reranking model from {rerank_model_path}. Using base model instead. Error: {e}")
+            self.rerank_tokenizer = AutoTokenizer.from_pretrained(retrieval_model_name)
+            self.rerank_model = AutoModelForSequenceClassification.from_pretrained(retrieval_model_name, num_labels=2).to(self.device)
         
         # 3-1. Load Answer Generation Model (LLM)
         llm_config = self.config.get("llm", {})
         llm_model_name = llm_config.get("model_name", "gpt2")
         print(f"[3/4] Loading Answer Generation Model: {llm_model_name}")
         
-        if USE_VLLM:
+        # OpenAI API 모델인지 확인
+        if llm_model_name.startswith("gpt-") or "openai" in llm_model_name.lower():
+            if not USE_OPENAI:
+                raise ImportError("OpenAI API를 사용하려면 langchain-openai가 필요합니다: pip install langchain-openai")
+            self._init_openai_llm(llm_model_name, llm_config, is_answer_gen=True)
+        elif USE_VLLM:
             try:
                 self.llm = LLM(
                     model=llm_model_name,
@@ -130,14 +95,21 @@ class VetRAGPipeline:
         if rationale_model_name and self.use_rationale:
             print(f"[4/4] Rationale Generation Model: {rationale_model_name} (will be loaded on-demand)")
             self.rationale_model_name = rationale_model_name
-            self.rationale_llm_tokenizer = None
-            self.rationale_llm_model = None
+            # OpenAI API 모델인 경우 별도 초기화 불필요 (지연 로딩)
+            if rationale_model_name.startswith("gpt-") or "openai" in rationale_model_name.lower():
+                self.rationale_llm = None  # 지연 로딩
+            else:
+                self.rationale_llm_tokenizer = None
+                self.rationale_llm_model = None
         else:
             # Rationale 모델이 설정되지 않았거나 비활성화된 경우, Answer Generation 모델 재사용
             print(f"[4/4] Rationale Generation Model not specified. Using Answer Generation Model.")
             self.rationale_model_name = llm_model_name
-            self.rationale_llm_tokenizer = self.llm_tokenizer
-            self.rationale_llm_model = self.llm_model
+            if hasattr(self, 'llm') and isinstance(self.llm, ChatOpenAI):
+                self.rationale_llm = self.llm
+            else:
+                self.rationale_llm_tokenizer = self.llm_tokenizer
+                self.rationale_llm_model = self.llm_model
         
         # Rationale Generation 프롬프트 템플릿 (키워드 확장 중심)
         self.rationale_prompt_template = rationale_config.get(
@@ -184,6 +156,58 @@ class VetRAGPipeline:
             print(f"[SUCCESS] Knowledge base loaded: {len(self.documents)} documents.")
         else:
             print("[WARNING] No knowledge base directories provided. Retrieval will not work until documents are loaded.")
+    
+    def _get_openai_api_key(self) -> Optional[str]:
+        """OpenAI API 키를 환경변수나 .env 파일에서 가져옵니다."""
+        # 1차: 환경변수
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("TOKEN")
+        if api_key:
+            return api_key
+        
+        # 2차: .env 파일에서 직접 파싱
+        env_paths = [
+            Path(__file__).resolve().parent.parent / ".env",
+            Path.cwd() / ".env",
+        ]
+        for env_path in env_paths:
+            if env_path.exists():
+                try:
+                    text = env_path.read_text(encoding="utf-8")
+                    for line in text.splitlines():
+                        stripped = line.strip().lstrip("\ufeff")
+                        if stripped.startswith("#") or not stripped:
+                            continue
+                        if stripped.upper().startswith("TOKEN") and "=" in stripped:
+                            api_key = stripped.split("=", 1)[1].strip().strip('"').strip("'")
+                            if api_key:
+                                return api_key
+                except Exception as e:
+                    print(f"[WARNING] Failed to read .env from {env_path}: {e}")
+        
+        return None
+    
+    def _init_openai_llm(self, model_name: str, config: Dict, is_answer_gen: bool = True):
+        """OpenAI API를 사용하는 LLM을 초기화합니다."""
+        api_key = self._get_openai_api_key()
+        if not api_key:
+            raise ValueError("OpenAI API 키를 찾을 수 없습니다. OPENAI_API_KEY 또는 TOKEN 환경변수를 설정하거나 .env 파일에 TOKEN=... 을 추가하세요.")
+        
+        temperature = config.get("temperature", 0.7 if is_answer_gen else 0.1)
+        max_tokens = config.get("max_tokens", 512 if is_answer_gen else 128)
+        
+        llm = ChatOpenAI(
+            model=model_name,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            api_key=api_key,
+        )
+        
+        if is_answer_gen:
+            self.llm = llm
+            print(f"[SUCCESS] Answer Generation Model (OpenAI API: {model_name}) initialized.")
+        else:
+            self.rationale_llm = llm
+            print(f"[SUCCESS] Rationale Generation Model (OpenAI API: {model_name}) initialized.")
             
     def use_vllm_fallback(self, model_name, is_answer_gen=True):
         """
@@ -258,15 +282,26 @@ class VetRAGPipeline:
         """
         Rationale Generation 모델을 지연 로딩합니다.
         필요할 때만 로드하고 사용 후 메모리에서 해제합니다.
-        Answer 모델을 먼저 해제한 후 Rationale 모델을 로드합니다.
+        OpenAI API 모델인 경우 별도 해제 불필요.
         """
-        if self.rationale_llm_model is not None:
+        # OpenAI API 모델인 경우
+        if self.rationale_model_name and (self.rationale_model_name.startswith("gpt-") or "openai" in self.rationale_model_name.lower()):
+            if self.rationale_llm is None:
+                rationale_config = self.config.get("rationale_gen", {})
+                self._init_openai_llm(self.rationale_model_name, rationale_config, is_answer_gen=False)
+            return
+        
+        # 로컬 모델인 경우
+        if hasattr(self, 'rationale_llm_model') and self.rationale_llm_model is not None:
             return  # 이미 로드됨
         
         if not self.rationale_model_name or self.rationale_model_name == self.config.get("llm", {}).get("model_name"):
             # Answer Generation 모델 재사용
-            self.rationale_llm_tokenizer = self.llm_tokenizer
-            self.rationale_llm_model = self.llm_model
+            if hasattr(self, 'llm') and isinstance(self.llm, ChatOpenAI):
+                self.rationale_llm = self.llm
+            else:
+                self.rationale_llm_tokenizer = self.llm_tokenizer
+                self.rationale_llm_model = self.llm_model
             return
         
         # Answer 모델을 먼저 메모리에서 해제 (GPU 메모리 확보)
@@ -287,19 +322,25 @@ class VetRAGPipeline:
         """
         Rationale Generation 모델을 메모리에서 해제합니다.
         Answer 모델 재로딩은 generate 메서드에서 필요할 때 수행합니다.
+        OpenAI API 모델인 경우 해제 불필요.
         """
-        if self.rationale_llm_model is not None and self.rationale_llm_model != self.llm_model:
-            print(f"[INFO] Unloading Rationale Generation model from GPU memory...")
-            del self.rationale_llm_model
-            del self.rationale_llm_tokenizer
-            self.rationale_llm_model = None
-            self.rationale_llm_tokenizer = None
-            # 강력한 메모리 정리
-            torch.cuda.empty_cache()
-            import gc
-            gc.collect()
-            torch.cuda.empty_cache()
-            print(f"[SUCCESS] Rationale Generation model unloaded.")
+        # OpenAI API 모델인 경우 해제 불필요
+        if hasattr(self, 'rationale_llm') and isinstance(self.rationale_llm, ChatOpenAI):
+            return
+        
+        if hasattr(self, 'rationale_llm_model') and self.rationale_llm_model is not None:
+            if not hasattr(self, 'llm_model') or self.rationale_llm_model != self.llm_model:
+                print(f"[INFO] Unloading Rationale Generation model from GPU memory...")
+                del self.rationale_llm_model
+                del self.rationale_llm_tokenizer
+                self.rationale_llm_model = None
+                self.rationale_llm_tokenizer = None
+                # 강력한 메모리 정리
+                torch.cuda.empty_cache()
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+                print(f"[SUCCESS] Rationale Generation model unloaded.")
     
     def generate_rationale(self, query: str) -> str:
         """
@@ -311,38 +352,46 @@ class VetRAGPipeline:
         
         # Rationale 모델 지연 로딩
         self._load_rationale_model()
-        rationale_tokenizer = self.rationale_llm_tokenizer
-        rationale_model = self.rationale_llm_model
         
         try:
-            inputs = rationale_tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
-                max_length=1024
-            ).to(self.device)
-            
-            input_length = inputs.input_ids.shape[1]
-            
-            with torch.no_grad():
-                outputs = rationale_model.generate(
-                    **inputs,
-                    max_new_tokens=self.config.get("rationale_gen", {}).get("max_tokens", 128),
-                    do_sample=True,
-                    temperature=self.config.get("rationale_gen", {}).get("temperature", 0.1),
-                    top_p=self.config.get("rationale_gen", {}).get("top_p", 0.9),
-                    repetition_penalty=1.2,
-                    pad_token_id=rationale_tokenizer.eos_token_id,
-                    eos_token_id=rationale_tokenizer.eos_token_id
-                )
-            
-            # 생성된 부분만 추출 (입력 프롬프트 제외)
-            generated_ids = outputs[0][input_length:]
-            rationale_text = rationale_tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-            
-            # Rationale 모델 해제 (메모리 절약)
-            if rationale_model != self.llm_model:
-                self._unload_rationale_model()
+            # OpenAI API 모델인 경우
+            if hasattr(self, 'rationale_llm') and isinstance(self.rationale_llm, ChatOpenAI):
+                messages = [{"role": "user", "content": prompt}]
+                response = self.rationale_llm.invoke(messages)
+                rationale_text = response.content.strip()
+            else:
+                # 로컬 모델인 경우
+                rationale_tokenizer = self.rationale_llm_tokenizer
+                rationale_model = self.rationale_llm_model
+                
+                inputs = rationale_tokenizer(
+                    prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=1024
+                ).to(self.device)
+                
+                input_length = inputs.input_ids.shape[1]
+                
+                with torch.no_grad():
+                    outputs = rationale_model.generate(
+                        **inputs,
+                        max_new_tokens=self.config.get("rationale_gen", {}).get("max_tokens", 128),
+                        do_sample=True,
+                        temperature=self.config.get("rationale_gen", {}).get("temperature", 0.1),
+                        top_p=self.config.get("rationale_gen", {}).get("top_p", 0.9),
+                        repetition_penalty=1.2,
+                        pad_token_id=rationale_tokenizer.eos_token_id,
+                        eos_token_id=rationale_tokenizer.eos_token_id
+                    )
+                
+                # 생성된 부분만 추출 (입력 프롬프트 제외)
+                generated_ids = outputs[0][input_length:]
+                rationale_text = rationale_tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+                
+                # Rationale 모델 해제 (메모리 절약)
+                if hasattr(self, 'llm_model') and rationale_model != self.llm_model:
+                    self._unload_rationale_model()
             
             # 키워드 파싱: 콤마로 구분된 키워드 추출
             keywords = []
@@ -384,9 +433,10 @@ class VetRAGPipeline:
             
         except Exception as e:
             print(f"[WARNING] [Rationale] Error during generation: {e}. Using original query.")
-            # 에러 발생 시에도 모델 해제
-            if rationale_model != self.llm_model:
-                self._unload_rationale_model()
+            # 에러 발생 시에도 모델 해제 (로컬 모델인 경우만)
+            if hasattr(self, 'rationale_llm_model') and hasattr(self, 'llm_model'):
+                if self.rationale_llm_model != self.llm_model:
+                    self._unload_rationale_model()
             # 실패 시에도 최소 정보는 기록
             self.last_rationale = {
                 "original_query": query,
@@ -475,15 +525,24 @@ class VetRAGPipeline:
         """
         Answer Generation 모델이 로드되어 있는지 확인하고, 없으면 다시 로드합니다.
         """
-        if self.llm_model is None or self.llm_tokenizer is None:
+        llm_config = self.config.get("llm", {})
+        llm_model_name = llm_config.get("model_name", "gpt2")
+        
+        # OpenAI API 모델인 경우
+        if llm_model_name.startswith("gpt-") or "openai" in llm_model_name.lower():
+            if not hasattr(self, 'llm') or self.llm is None:
+                print(f"[INFO] Answer Generation model not loaded. Initializing OpenAI API...")
+                self._init_openai_llm(llm_model_name, llm_config, is_answer_gen=True)
+            return
+        
+        # 로컬 모델인 경우
+        if not hasattr(self, 'llm_model') or self.llm_model is None or (hasattr(self, 'llm_tokenizer') and self.llm_tokenizer is None):
             print(f"[INFO] Answer Generation model not loaded. Reloading...")
             # 추가 메모리 정리
             import gc
             gc.collect()
             torch.cuda.empty_cache()
             
-            llm_config = self.config.get("llm", {})
-            llm_model_name = llm_config.get("model_name", "gpt2")
             self.use_vllm_fallback(llm_model_name, is_answer_gen=True)
             print(f"[SUCCESS] Answer Generation model reloaded.")
     
@@ -494,29 +553,51 @@ class VetRAGPipeline:
         
         prompt = build_prompt(query, context_docs)
         
-        if USE_VLLM:
+        # OpenAI API 모델인 경우
+        if hasattr(self, 'llm') and isinstance(self.llm, ChatOpenAI):
+            # build_prompt는 이제 시스템 역할 없이 순수 작업 지시만 반환
+            # 시스템 프롬프트는 여기서 정의
+            system_content = (
+                "당신은 반려동물 관련 의학 정보를 전문적으로 설명하는 수의사 AI입니다.\n"
+                "\n"
+                "【핵심 규칙】\n"
+                "1. 답변은 반드시 100% 한국어로만 작성하세요.\n"
+                "2. 제공된 [참고 자료]의 내용만을 근거로 답변하세요.\n"
+                "3. [참고 자료]에 없는 의학 지식이나 약물 정보를 추측하거나 만들어내지 마세요.\n"
+                "4. 정보가 불충분할 경우 '제공된 정보만으로는 판단하기 어렵습니다'라고 명시하세요.\n"
+                "5. 전문 용어는 보호자가 이해하기 쉽게 풀어서 설명하세요.\n"
+                "\n"
+                "【답변 형식】\n"
+                "사용자가 요청한 답변 형식(핵심 진단/평가, 추가 조치, 주의사항, 근거 요약)을 반드시 준수하세요."
+            )
+            # build_prompt의 결과는 [참고 자료] + [질문] + [답변 지침]
+            messages = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt}
+            ]
+            response = self.llm.invoke(messages)
+            return response.content.strip()
+        elif USE_VLLM and hasattr(self, 'llm') and not isinstance(self.llm, ChatOpenAI):
             outputs = self.llm.generate([prompt], self.sampling_params)
             response = outputs[0].outputs[0].text.strip()
             return response
         else:
             # Llama2/Qwen 모델의 경우 채팅 템플릿 사용 시도
             try:
-                # Qwen2.5 채팅 템플릿 사용 (강화된 시스템 프롬프트)
+                # Qwen2.5 채팅 템플릿 사용
                 if hasattr(self.llm_tokenizer, 'apply_chat_template'):
                     system_content = (
                         "당신은 반려동물 관련 의학 정보를 전문적으로 설명하는 수의사 AI입니다.\n"
-                        "반드시 제공된 근거만을 활용해 질문에 답변하세요.\n"
                         "\n"
-                        "【중요 규칙 - 반드시 준수하세요】\n"
-                        "1. 답변은 반드시 한국어로만 작성하세요. 중국어, 영어, 일본어 등 다른 언어를 절대 사용하지 마세요.\n"
-                        "2. 문맥에 관련 내용이 없거나 근거가 충분하지 않으면 반드시 '정보 부족'이라고 답하세요.\n"
-                        "3. 문맥에 없는 의학 지식이나 약물 정보를 새로 추측하거나 만들어내지 마세요.\n"
-                        "4. 근거가 충분하지 않으면 '제공된 정보만으로는 답변하기 어렵습니다.' 또는 '정보 부족'이라고 명확히 밝히세요.\n"
+                        "【핵심 규칙】\n"
+                        "1. 답변은 반드시 100% 한국어로만 작성하세요.\n"
+                        "2. 제공된 [참고 자료]의 내용만을 근거로 답변하세요.\n"
+                        "3. [참고 자료]에 없는 의학 지식이나 약물 정보를 추측하거나 만들어내지 마세요.\n"
+                        "4. 정보가 불충분할 경우 '제공된 정보만으로는 판단하기 어렵습니다'라고 명시하세요.\n"
+                        "5. 전문 용어는 보호자가 이해하기 쉽게 풀어서 설명하세요.\n"
                         "\n"
-                        "【언어 규칙】\n"
-                        "- 답변은 100% 한국어로만 작성하세요.\n"
-                        "- 다른 언어를 섞으면 안 됩니다.\n"
-                        "- 중국어, 영어, 일본어 등 어떤 다른 언어도 사용하지 마세요."
+                        "【답변 형식】\n"
+                        "사용자가 요청한 답변 형식(핵심 진단/평가, 추가 조치, 주의사항, 근거 요약)을 반드시 준수하세요."
                     )
                     messages = [
                         {"role": "system", "content": system_content},
@@ -526,21 +607,19 @@ class VetRAGPipeline:
                         messages, tokenize=False, add_generation_prompt=True
                     )
                 else:
-                    # 채팅 템플릿이 없는 경우 강화된 시스템 프롬프트 사용
+                    # 채팅 템플릿이 없는 경우
                     system_msg = (
                         "당신은 반려동물 관련 의학 정보를 전문적으로 설명하는 수의사 AI입니다.\n"
-                        "반드시 제공된 근거만을 활용해 질문에 답변하세요.\n"
                         "\n"
-                        "【중요 규칙 - 반드시 준수하세요】\n"
-                        "1. 답변은 반드시 한국어로만 작성하세요. 중국어, 영어, 일본어 등 다른 언어를 절대 사용하지 마세요.\n"
-                        "2. 문맥에 관련 내용이 없거나 근거가 충분하지 않으면 반드시 '정보 부족'이라고 답하세요.\n"
-                        "3. 문맥에 없는 의학 지식이나 약물 정보를 새로 추측하거나 만들어내지 마세요.\n"
-                        "4. 근거가 충분하지 않으면 '제공된 정보만으로는 답변하기 어렵습니다.' 또는 '정보 부족'이라고 명확히 밝히세요.\n"
+                        "【핵심 규칙】\n"
+                        "1. 답변은 반드시 100% 한국어로만 작성하세요.\n"
+                        "2. 제공된 [참고 자료]의 내용만을 근거로 답변하세요.\n"
+                        "3. [참고 자료]에 없는 의학 지식이나 약물 정보를 추측하거나 만들어내지 마세요.\n"
+                        "4. 정보가 불충분할 경우 '제공된 정보만으로는 판단하기 어렵습니다'라고 명시하세요.\n"
+                        "5. 전문 용어는 보호자가 이해하기 쉽게 풀어서 설명하세요.\n"
                         "\n"
-                        "【언어 규칙】\n"
-                        "- 답변은 100% 한국어로만 작성하세요.\n"
-                        "- 다른 언어를 섞으면 안 됩니다.\n"
-                        "- 중국어, 영어, 일본어 등 어떤 다른 언어도 사용하지 마세요."
+                        "【답변 형식】\n"
+                        "사용자가 요청한 답변 형식(핵심 진단/평가, 추가 조치, 주의사항, 근거 요약)을 반드시 준수하세요."
                     )
                     formatted_prompt = f"<s>[INST] <<SYS>>\n{system_msg}\n<</SYS>>\n\n{prompt} [/INST]"
             except Exception as e:
@@ -572,19 +651,17 @@ class VetRAGPipeline:
             response = self.llm_tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
             
             # 추가 정리: 프롬프트가 여전히 포함되어 있으면 제거
-            if "[근거]" in response or "[질문]" in response:
-                # "[답변]" 이후 부분만 추출
-                if "[답변]" in response:
-                    response = response.split("[답변]", 1)[-1].strip()
-                # 프롬프트의 시스템 메시지가 포함되어 있으면 제거
+            # 새 프롬프트 형식에 맞춰 필터링 업데이트
+            if "### [참고 자료" in response or "### [사용자 질문" in response:
+                # 답변 내용만 추출 (프롬프트 지침 제거)
+                if "### [답변 작성 지침]" in response:
+                    response = response.split("### [답변 작성 지침]", 1)[0].strip()
+                # 시스템 메시지가 포함되어 있으면 제거
                 if "당신은 반려동물" in response:
                     lines = response.split("\n")
                     filtered_lines = []
-                    skip_until_answer = False
                     for line in lines:
-                        if "답변" in line or "### 답변" in line:
-                            skip_until_answer = True
-                        if skip_until_answer and "당신은" not in line and "반려동물" not in line:
+                        if "당신은" not in line and "반려동물" not in line and "【" not in line:
                             filtered_lines.append(line)
                     response = "\n".join(filtered_lines).strip()
             

@@ -15,4 +15,3 @@ transformers
 ragas
 langchain-openai
 datasets
-huggingface_hub

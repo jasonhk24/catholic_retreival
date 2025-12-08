@@ -22,16 +22,15 @@ llm_scorer:
 
 # LLM Settings (for Inference/Generation)
 llm:
-  model_name: "Qwen/Qwen2.5-7B-Instruct"  # Answer Generation용 Qwen2.5
-  quantization: "bnb_4bit"
-  gpu_memory_utilization: 0.90
-  max_model_len: 4096
-  dtype: "float16"
+  model_name: "gpt-4o-mini"  # Answer Generation용 OpenAI API 모델
+  api_key: null  # 환경변수 OPENAI_API_KEY 또는 TOKEN 사용
+  temperature: 0.7
+  max_tokens: 512
 
 # Rationale Generation Settings (RAG^2-style Query Enhancement)
 rationale_gen:
   enabled: true  # false로 설정하면 Rationale Generation을 건너뜁니다
-  model_name: "Qwen/Qwen2.5-7B-Instruct"  # Rationale Generation용 Qwen2.5
+  model_name: "gpt-4o-mini"  # Rationale Generation용 OpenAI API 모델
   temperature: 0.1  # 낮게 설정하여 일관성 있는 출력
   top_p: 0.9
   max_tokens: 128  # 키워드만 필요하므로 짧게
@@ -73,10 +72,6 @@ training:
   save_total_limit: 1  # 저장할 체크포인트 수 제한
   load_best_model_at_end: true
   metric_for_best_model: "f1"  # "accuracy", "f1", "precision", "recall"
-  
-  # Hugging Face 모델 저장소 (선택사항)
-  # upload_model.py로 모델을 업로드한 후, 아래 주석을 해제하고 리포지토리 이름을 입력하세요
-  huggingface_repo_id: "JOhyeongi/top25bert"  # 업로드된 모델 리포지토리
   
   # 기타 설정
   fp16: true  # GPU 사용 시 FP16 활성화
