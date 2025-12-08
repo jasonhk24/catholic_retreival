@@ -278,6 +278,40 @@ python main_curation.py --mode train --curated_data curated_dataset.json
 
 ---
 
+## 🤗 Hugging Face 모델 사용법
+
+본 프로젝트의 Fine-tuned Cross-Encoder는 Hugging Face에 공개되어 있습니다.
+
+### 모델 정보
+- **모델명**: [JOhyeongi/vet-kmbert-cross-encoder](https://huggingface.co/JOhyeongi/vet-kmbert-cross-encoder)
+- **베이스 모델**: madatnlp/km-bert
+- **태스크**: Binary Classification (질문-문서 연관성 판단)
+- **언어**: 한국어
+
+### 사용 예제
+
+```python
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# 모델 다운로드 및 로드
+model = AutoModelForSequenceClassification.from_pretrained(
+    "JOhyeongi/vet-kmbert-cross-encoder"
+)
+tokenizer = AutoTokenizer.from_pretrained(
+    "JOhyeongi/vet-kmbert-cross-encoder"
+)
+
+# 추론
+query = "강아지가 구토를 해요"
+document = "구토의 원인은..."
+inputs = tokenizer([[query, document]], return_tensors="pt", max_length=512)
+score = model(**inputs).logits.softmax(dim=1)[0][1].item()
+
+print(f"연관성 점수: {score:.4f}")
+```
+
+---
+
 ### Step 4️⃣: 추론 테스트
 
 ```bash
